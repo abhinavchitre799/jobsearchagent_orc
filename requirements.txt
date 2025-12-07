@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+openai
+pytest
+# OpenAI client uses httpx with 'proxies' kw; httpx 0.28 dropped it.
+httpx<0.28

@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RAG Outreach Builder</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --panel: #ffffff;
+      --accent: #0f766e;
+      --accent-2: #f59e0b;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: "Avenir Next", "Segoe UI Variable", "SF Pro Display", "Helvetica Neue", sans-serif;
+      background: radial-gradient(circle at 10% 20%, rgba(15, 118, 110, 0.12), transparent 25%),
+                  radial-gradient(circle at 80% 0%, rgba(245, 158, 11, 0.15), transparent 20%),
+                  var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 24px 72px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.5px;
+    }
+    header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      max-width: 640px;
+      line-height: 1.5;
+    }
+    .tag {
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 20px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+    }
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 19px;
+      letter-spacing: -0.2px;
+    }
+    .section { margin-bottom: 16px; }
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    input[type="text"], textarea, select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #fdfefe;
+      font-size: 14px;
+      color: var(--text);
+      transition: border 0.15s ease, box-shadow 0.15s ease;
+    }
+    input[type="text"]:focus, textarea:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.12);
+      outline: none;
+    }
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+    .inline {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .hint {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+    .upload {
+      border: 1px dashed var(--border);
+      background: #f8fafc;
+      padding: 12px 14px;
+      border-radius: 12px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: none;
+      background: linear-gradient(135deg, var(--accent), #0d4d46);
+      color: #ffffff;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      font-size: 14px;
+      letter-spacing: 0.2px;
+    }
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(15, 118, 110, 0.25); }
+    .btn:active { transform: translateY(0); box-shadow: none; }
+    .btn.secondary { background: #0f172a; }
+    .output {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 14px;
+      padding: 16px;
+      min-height: 220px;
+      white-space: pre-wrap;
+      line-height: 1.6;
+      border: 1px solid #1e293b;
+    }
+    .output header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 0 12px;
+      padding: 0 0 8px;
+      border-bottom: 1px solid #1f2937;
+    }
+    .output header h3 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0.2px;
+      color: #e2e8f0;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: rgba(15, 118, 110, 0.15);
+      color: #a5f3fc;
+      font-size: 12px;
+      margin-right: 8px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .status {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 10px;
+      min-height: 18px;
+    }
+    .dual-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+      header { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <div>
+        <div class="tag">Resume-grounded LinkedIn DM</div>
+        <h1>Craft a hiring manager message</h1>
+        <p>Drop a resume, paste a JD and any LinkedIn note you received. The agent grounds highlights from your resume to justify fit and produces a ready-to-send reply.</p>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Inputs</h2>
+        <div class="section inline">
+          <div>
+            <label for="name">Your name *</label>
+            <input id="name" type="text" placeholder="Alex Rivera" required>
+          </div>
+          <div>
+            <label for="role">Role (optional)</label>
+            <input id="role" type="text" placeholder="Product Manager">
+          </div>
+        </div>
+        <div class="section inline">
+          <div>
+            <label for="company">Company (optional)</label>
+            <input id="company" type="text" placeholder="Northwind Labs">
+          </div>
+          <div>
+            <label for="hm-name">Hiring manager name (optional)</label>
+            <input id="hm-name" type="text" placeholder="Jordan Lee">
+          </div>
+        </div>
+
+        <div class="section">
+          <label for="jd">Job description *</label>
+          <textarea id="jd" placeholder="Paste the JD or the recruiter’s description..."></textarea>
+        </div>
+
+        <div class="section">
+          <label for="hm-note">LinkedIn message from hiring manager</label>
+          <textarea id="hm-note" placeholder="Hi Alex, we're opening a senior PM role focused on experimentation..."></textarea>
+          <div class="hint">Optional, but it helps personalize the opener and matching.</div>
+        </div>
+
+        <div class="section">
+          <label>Resume *</label>
+          <div class="upload">
+            <input id="resume-file" type="file" accept=".txt,.md,.rtf,.docx,.pdf">
+            <div class="hint">Best results with a .txt export. You can also paste it below.</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <label for="resume-text">Or paste resume text</label>
+          <textarea id="resume-text" placeholder="Work experience, projects, education..."></textarea>
+        </div>
+
+        <div class="actions">
+          <button class="btn" id="generate">Generate drafts</button>
+          <div class="status" id="status"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Drafts</h2>
+        <div class="dual-grid">
+          <div class="output">
+            <header>
+              <h3>LinkedIn message</h3>
+              <div class="pill">Resume grounded</div>
+            </header>
+            <div id="message-output">Your message will appear here.</div>
+          </div>
+          <div class="actions" style="margin-top:8px;">
+            <button class="btn secondary" id="copy-message">Copy</button>
+            <button class="btn" id="download-message" style="background: var(--accent-2); color: #0f172a;">Download .txt</button>
+            <div class="status" id="message-status"></div>
+          </div>
+          <div class="output">
+            <header>
+              <h3>Cover letter</h3>
+              <div class="pill">Resume grounded</div>
+            </header>
+            <div id="cover-output">Your cover letter will appear here.</div>
+          </div>
+          <div class="actions" style="margin-top:8px;">
+            <button class="btn secondary" id="copy-cover">Copy</button>
+            <button class="btn" id="download-cover" style="background: var(--accent-2); color: #0f172a;">Download .txt</button>
+            <div class="status" id="cover-status"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const messageEl = document.getElementById("message-output");
+    const coverEl = document.getElementById("cover-output");
+    const messageStatus = document.getElementById("message-status");
+    const coverStatus = document.getElementById("cover-status");
+    let uploadedResume = "";
+    const API_BASE = "http://localhost:8000"; // Update if your API runs elsewhere.
+
+    const setStatus = (msg, isError = false) => {
+      statusEl.textContent = msg;
+      statusEl.style.color = isError ? "#b91c1c" : "var(--muted)";
+    };
+    const setOutputStatus = (el, msg, isError = false) => {
+      el.textContent = msg;
+      el.style.color = isError ? "#b91c1c" : "var(--muted)";
+    };
+
+    document.getElementById("resume-file").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) { uploadedResume = ""; return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        uploadedResume = reader.result;
+        setStatus(`Loaded resume: ${file.name}`);
+      };
+      reader.onerror = () => setStatus("Could not read that file. Try a .txt export.", true);
+      reader.readAsText(file);
+    });
+
+    document.getElementById("generate").addEventListener("click", () => {
+      setStatus("");
+      const candidate = document.getElementById("name").value.trim();
+      const role = document.getElementById("role").value.trim() || "Product Manager";
+      const company = document.getElementById("company").value.trim();
+      const hiringManager = document.getElementById("hm-name").value.trim();
+      const jd = document.getElementById("jd").value.trim();
+      const hmNote = document.getElementById("hm-note").value.trim();
+      const resumeFallback = document.getElementById("resume-text").value.trim();
+      const resumeText = uploadedResume.trim() || resumeFallback;
+
+      if (!candidate) return setStatus("Please add your name.", true);
+      if (!jd) return setStatus("Please paste the job description.", true);
+      if (!resumeText) return setStatus("Load or paste your resume.", true);
+
+      const payload = {
+        name: candidate,
+        resumeText,
+        jdText: jd,
+        hmNote: hmNote || null,
+        role: role || null,
+        company: company || null,
+        hiringManager: hiringManager || null,
+        topK: 3,
+        embeddingModel: "text-embedding-3-small",
+        chatModel: "gpt-4o-mini",
+      };
+
+      setStatus("Calling OpenAI backend...");
+      const callBackend = (outputType) =>
+        fetch(`${API_BASE}/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, outputType }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || "Backend error");
+          }
+          return res.json();
+        });
+
+      Promise.all([callBackend("message"), callBackend("cover-letter")])
+        .then(([msgData, coverData]) => {
+          messageEl.textContent = msgData.message || "No message returned.";
+          coverEl.textContent = coverData.message || "No cover letter returned.";
+          const msgTokens = msgData.tokenEstimate ? `msg ~${msgData.tokenEstimate} tok` : "";
+          const coverTokens = coverData.tokenEstimate ? `cover ~${coverData.tokenEstimate} tok` : "";
+          const tokenNote = [msgTokens, coverTokens].filter(Boolean).join(", ");
+          setStatus(`Drafts updated (OpenAI). ${tokenNote}`);
+          setOutputStatus(messageStatus, "");
+          setOutputStatus(coverStatus, "");
+        })
+        .catch((err) => {
+          console.error(err);
+          setStatus(err.message || "Failed to reach backend.", true);
+        });
+    });
+
+    const copyText = async (text, statusTarget) => {
+      if (!text) {
+        setOutputStatus(statusTarget, "Nothing to copy yet.", true);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        setOutputStatus(statusTarget, "Copied.");
+      } catch (err) {
+        setOutputStatus(statusTarget, "Clipboard not available here.", true);
+      }
+    };
+
+    const downloadText = (text, filename, statusTarget) => {
+      if (!text) {
+        setOutputStatus(statusTarget, "Nothing to download yet.", true);
+        return;
+      }
+      const blob = new Blob([text], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setOutputStatus(statusTarget, `Downloaded ${filename}`);
+    };
+
+    document.getElementById("copy-message").addEventListener("click", () => {
+      const text = messageEl.textContent.trim();
+      copyText(text && text !== "Your message will appear here." ? text : "", messageStatus);
+    });
+
+    document.getElementById("copy-cover").addEventListener("click", () => {
+      const text = coverEl.textContent.trim();
+      copyText(text && text !== "Your cover letter will appear here." ? text : "", coverStatus);
+    });
+
+    document.getElementById("download-message").addEventListener("click", () => {
+      const text = messageEl.textContent.trim();
+      downloadText(text && text !== "Your message will appear here." ? text : "", "message.txt", messageStatus);
+    });
+
+    document.getElementById("download-cover").addEventListener("click", () => {
+      const text = coverEl.textContent.trim();
+      downloadText(text && text !== "Your cover letter will appear here." ? text : "", "cover-letter.txt", coverStatus);
+    });
+  </script>
+</body>
+</html>
