@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 
 from rag import (
     DEFAULT_MAX_CHARS,
-    build_llm_message,
+    generate_agentic_message,
+    generate_orchestrated_message,
     retrieve_chunks_with_embeddings,
     split_into_chunks,
     truncate_text,
@@ -27,7 +28,7 @@ app.add_middleware(
 
 
 class GenerateRequest(BaseModel):
-    name: str = Field(..., description="Candidate name")
+    name: str | None = Field(None, description="Candidate name (optional)")
     resumeText: str = Field(..., description="Full resume as text")
     jdText: str = Field(..., description="Job description text")
     hmNote: str | None = Field(None, description="Hiring manager LinkedIn note")
@@ -38,6 +39,7 @@ class GenerateRequest(BaseModel):
     embeddingModel: str = Field("text-embedding-3-small")
     chatModel: str = Field("gpt-4o-mini")
     outputType: str = Field("message", description="message or cover-letter")
+    orchestrate: bool = Field(True, description="Use AI orchestration to choose next action")
 
 
 class GenerateResponse(BaseModel):
@@ -68,22 +70,38 @@ def generate(request: GenerateRequest) -> GenerateResponse:
     token_estimate = max(1, (len(resume_text) + len(query_text)) // 4)
 
     role_value = request.role or "Product Manager"
-    retrieved = retrieve_chunks_with_embeddings(
-        client,
-        resume_chunks,
-        query_text,
-        embedding_model=request.embeddingModel,
-        top_k=request.topK,
-    )
-    message = build_llm_message(
-        client,
-        candidate=request.name,
-        role=role_value,
-        company=request.company,
-        hiring_manager=request.hiringManager,
-        query=query_text,
-        retrieved_chunks=retrieved,
-        chat_model=request.chatModel,
-        output_type=request.outputType,
-    )
+    candidate_name = request.name or "Candidate"
+    if request.orchestrate:
+        message = generate_orchestrated_message(
+            client,
+            candidate=candidate_name,
+            role=role_value,
+            company=request.company,
+            hiring_manager=request.hiringManager,
+            query=query_text,
+            resume_chunks=resume_chunks,
+            embedding_model=request.embeddingModel,
+            top_k=request.topK,
+            chat_model=request.chatModel,
+            output_type=request.outputType,
+        )
+    else:
+        retrieved = retrieve_chunks_with_embeddings(
+            client,
+            resume_chunks,
+            query_text,
+            embedding_model=request.embeddingModel,
+            top_k=request.topK,
+        )
+        message = generate_agentic_message(
+            client,
+            candidate=candidate_name,
+            role=role_value,
+            company=request.company,
+            hiring_manager=request.hiringManager,
+            query=query_text,
+            retrieved_chunks=retrieved,
+            chat_model=request.chatModel,
+            output_type=request.outputType,
+        )
     return GenerateResponse(message=message, tokenEstimate=token_estimate)

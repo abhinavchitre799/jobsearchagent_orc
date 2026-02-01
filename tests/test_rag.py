@@ -100,7 +100,7 @@ def test_api_generate_uses_stubbed_llm(monkeypatch):
         return [vec.embedding for vec in fake_client.embeddings.create(model=model, input=texts).data]
 
     monkeypatch.setattr(rag, "embed_texts", fake_embed_texts)
-    monkeypatch.setattr("api.build_llm_message", lambda *a, **k: "stubbed message")
+    monkeypatch.setattr("api.generate_agentic_message", lambda *a, **k: "stubbed message")
     monkeypatch.setattr("api.OpenAI", lambda api_key=None: fake_client)
     client = TestClient(app)
     payload = {
@@ -108,9 +108,89 @@ def test_api_generate_uses_stubbed_llm(monkeypatch):
         "resumeText": "Built data systems and APIs.",
         "jdText": "Looking for a data engineer to build pipelines.",
         "hmNote": "Ping me if interested",
+        "orchestrate": False,
     }
     resp = client.post("/generate", json=payload)
     assert resp.status_code == 200
     data = resp.json()
     assert data["message"] == "stubbed message"
     assert data["tokenEstimate"] > 0
+
+
+def test_orchestrated_stops_on_no_improvement(monkeypatch):
+    client = FakeOpenAI(response_text="same draft")
+
+    monkeypatch.setattr(
+        rag,
+        "retrieve_chunks_with_embeddings",
+        lambda *a, **k: [("chunk", 0.2)],
+    )
+
+    draft_calls = {"count": 0}
+
+    def fake_build(*_args, **_kwargs):
+        draft_calls["count"] += 1
+        return "same draft"
+
+    monkeypatch.setattr(rag, "build_llm_message", fake_build)
+    monkeypatch.setattr(rag, "decide_next_action", lambda *a, **k: {"action": "draft"})
+
+    message = rag.generate_orchestrated_message(
+        client,
+        candidate="Alex",
+        role="Engineer",
+        company="Acme",
+        hiring_manager="Jordan",
+        query="We need engineers",
+        resume_chunks=["Built systems."],
+        embedding_model="fake",
+        top_k=3,
+        chat_model="fake-model",
+        output_type="message",
+    )
+
+    assert message == "same draft"
+    assert draft_calls["count"] == 2
+
+
+def test_orchestrated_caps_revisions(monkeypatch):
+    client = FakeOpenAI(response_text="irrelevant")
+
+    monkeypatch.setattr(
+        rag,
+        "retrieve_chunks_with_embeddings",
+        lambda *a, **k: [("chunk", 0.2)],
+    )
+    monkeypatch.setattr(rag, "decide_next_action", lambda *a, **k: {"action": "revise"})
+
+    draft_calls = {"count": 0}
+    revise_calls = {"count": 0}
+
+    def fake_build(*_args, **_kwargs):
+        draft_calls["count"] += 1
+        return "draft-0"
+
+    def fake_revise(*_args, **_kwargs):
+        revise_calls["count"] += 1
+        return f"draft-{revise_calls['count']}"
+
+    monkeypatch.setattr(rag, "build_llm_message", fake_build)
+    monkeypatch.setattr(rag, "revise_message", fake_revise)
+
+    message = rag.generate_orchestrated_message(
+        client,
+        candidate="Alex",
+        role="Engineer",
+        company="Acme",
+        hiring_manager="Jordan",
+        query="We need engineers",
+        resume_chunks=["Built systems."],
+        embedding_model="fake",
+        top_k=3,
+        chat_model="fake-model",
+        output_type="message",
+    )
+
+    assert message == "draft-2"
+    assert draft_calls["count"] == 1
+    assert revise_calls["count"] == 2

@@ -79,9 +79,64 @@ Job description / LinkedIn message:
 Relevant resume snippets:
 {snippet_text}
 
+Goal:
+{goal_text}
+
+Plan:
+{plan_text}
+
+Constraints:
+{constraints_text}
+
 Write a {output_type} from the candidate to the hiring manager that:
 - opens with a greeting using the manager name if available,
 - states interest in the role/company,
 - cites 2-3 resume-aligned highlights,
 - closes with a light call to action.
 Keep it concise."""
+
+PLANNER_SYSTEM_PROMPT = """
+You are a careful planning assistant. Given the goal, constraints, job context, and resume snippets,
+produce a short, numbered plan of 3-5 steps to draft the best possible output.
+Keep steps specific and minimal. Do not write the final message.
+"""
+
+CRITIC_SYSTEM_PROMPT = """
+You are a strict reviewer. Evaluate the draft against the goal and constraints.
+Return JSON with fields:
+- pass: true or false
+- issues: list of concrete problems
+- suggestions: list of fixes
+Be concise and only flag real problems.
+"""
+
+REVISER_SYSTEM_PROMPT = """
+You are a careful editor. Improve the draft using the critique.
+Follow the goal and constraints. Do not add facts not in the resume snippets.
+Return only the revised final message.
+"""
+
+ORCHESTRATOR_SYSTEM_PROMPT = """
+You are the orchestration controller for a resume-grounded writing agent.
+Choose the next action based on the current state.
+
+Allowed actions:
+- retrieve_more: get more resume snippets (increase top_k)
+- plan: create a brief plan
+- draft: produce an initial draft
+- critique: review the current draft
+- revise: improve the draft using critique feedback
+- finalize: stop and return the current draft
+
+Rules:
+- If critique_pass is true, choose finalize.
+- If revisions_remaining is 0, choose finalize.
+- If there is no draft, choose draft (or plan if missing and useful).
+- If there is a draft and no critique yet, choose critique.
+- If critique_pass is false, choose revise unless retrieval is clearly weak.
+- If retrieval is weak (very low scores or too few snippets), choose retrieve_more.
+
+Return JSON only with fields:
+{"action": "...", "reason": "...", "next_top_k": 5}
+The next_top_k field is optional and must be between 1 and 10 when provided.
+"""

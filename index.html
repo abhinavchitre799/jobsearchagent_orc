@@ -177,6 +177,12 @@
       flex-wrap: wrap;
       margin-top: 8px;
     }
+    .btn:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
     .status {
       font-size: 13px;
       color: var(--muted);
@@ -184,6 +190,113 @@
       min-height: 18px;
     }
     .dual-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.62);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      z-index: 50;
+      backdrop-filter: blur(4px);
+    }
+    .overlay.hidden { display: none; }
+    .overlay-card {
+      width: min(760px, 92vw);
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 18px;
+      border: 1px solid #1e293b;
+      padding: 22px 22px 18px;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.45);
+    }
+    .overlay-title {
+      font-size: 18px;
+      margin: 0 0 6px;
+      letter-spacing: -0.2px;
+    }
+    .overlay-sub {
+      margin: 0 0 18px;
+      color: #94a3b8;
+      font-size: 13px;
+    }
+    .spinner {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 3px solid rgba(148, 163, 184, 0.25);
+      border-top-color: var(--accent);
+      animation: spin 0.9s linear infinite;
+      margin: 10px 0 16px;
+    }
+    .step-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(148, 163, 184, 0.08);
+      border: 1px solid #1f2937;
+      font-size: 14px;
+    }
+    .step-indicator {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      border: 2px solid #475569;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .step-item.active .step-indicator {
+      border-color: var(--accent);
+    }
+    .step-item.active .step-indicator::after {
+      content: "";
+      position: absolute;
+      inset: -5px;
+      border-radius: 999px;
+      border: 2px solid rgba(15, 118, 110, 0.35);
+      animation: pulse 1.2s infinite;
+    }
+    .step-item.done .step-indicator {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .step-item.done .step-indicator::after {
+      content: "";
+      position: absolute;
+      left: 3px;
+      top: 1px;
+      width: 4px;
+      height: 7px;
+      border: 2px solid #0f172a;
+      border-top: 0;
+      border-left: 0;
+      transform: rotate(45deg);
+    }
+    .overlay-status {
+      margin-top: 12px;
+      font-size: 12px;
+      color: #94a3b8;
+      min-height: 16px;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.2; transform: scale(0.9); }
+      70% { opacity: 0.6; transform: scale(1); }
+      100% { opacity: 0.1; transform: scale(1.1); }
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
     @media (max-width: 900px) {
       .grid { grid-template-columns: 1fr; }
       header { flex-direction: column; align-items: flex-start; }
@@ -205,8 +318,8 @@
         <h2>Inputs</h2>
         <div class="section inline">
           <div>
-            <label for="name">Your name *</label>
-            <input id="name" type="text" placeholder="Alex Rivera" required>
+            <label for="name">Your name (optional)</label>
+            <input id="name" type="text" placeholder="Alex Rivera">
           </div>
           <div>
             <label for="role">Role (optional)</label>
@@ -286,13 +399,50 @@
     </div>
   </div>
 
+  <div class="overlay hidden" id="overlay">
+    <div class="overlay-card">
+      <h3 class="overlay-title">Agent run in progress</h3>
+      <p class="overlay-sub">Following the steps as the agent drafts each output.</p>
+      <div class="spinner" aria-hidden="true"></div>
+      <ul class="step-list">
+        <li class="step-item" data-step="validate">
+          <span class="step-indicator"></span>
+          <span>Validate inputs</span>
+        </li>
+        <li class="step-item" data-step="prep">
+          <span class="step-indicator"></span>
+          <span>Prepare resume and job context</span>
+        </li>
+        <li class="step-item" data-step="message">
+          <span class="step-indicator"></span>
+          <span>Generate LinkedIn message</span>
+        </li>
+        <li class="step-item" data-step="cover">
+          <span class="step-indicator"></span>
+          <span>Generate cover letter</span>
+        </li>
+        <li class="step-item" data-step="finalize">
+          <span class="step-indicator"></span>
+          <span>Finalize outputs</span>
+        </li>
+      </ul>
+      <div class="overlay-status" id="overlay-status"></div>
+    </div>
+  </div>
+
   <script>
     const statusEl = document.getElementById("status");
     const messageEl = document.getElementById("message-output");
     const coverEl = document.getElementById("cover-output");
     const messageStatus = document.getElementById("message-status");
     const coverStatus = document.getElementById("cover-status");
+    const overlayEl = document.getElementById("overlay");
+    const overlayStatus = document.getElementById("overlay-status");
+    const generateBtn = document.getElementById("generate");
+    const stepItems = Array.from(document.querySelectorAll(".step-item"));
     let uploadedResume = "";
+    let overlayTimer = null;
+    let overlayStartedAt = 0;
     const API_BASE = "http://localhost:8000"; // Update if your API runs elsewhere.
 
     const setStatus = (msg, isError = false) => {
@@ -302,6 +452,46 @@
     const setOutputStatus = (el, msg, isError = false) => {
       el.textContent = msg;
       el.style.color = isError ? "#b91c1c" : "var(--muted)";
+    };
+    const resetOverlay = () => {
+      stepItems.forEach((item) => {
+        item.classList.remove("active", "done");
+      });
+      overlayStatus.textContent = "";
+      overlayStatus.dataset.base = "";
+      const first = stepItems.find((item) => item.dataset.step === "validate");
+      if (first) first.classList.add("active");
+    };
+    const setStepState = (stepId, state) => {
+      const item = stepItems.find((el) => el.dataset.step === stepId);
+      if (!item) return;
+      item.classList.remove("active", "done");
+      if (state === "active") item.classList.add("active");
+      if (state === "done") item.classList.add("done");
+    };
+    const showOverlay = () => {
+      resetOverlay();
+      overlayEl.classList.remove("hidden");
+      generateBtn.disabled = true;
+      overlayStartedAt = Date.now();
+      if (overlayTimer) clearInterval(overlayTimer);
+      overlayTimer = setInterval(() => {
+        const elapsed = Math.max(0, Math.floor((Date.now() - overlayStartedAt) / 1000));
+        const base = overlayStatus.dataset.base || "Working...";
+        overlayStatus.textContent = `${base} (${elapsed}s)`;
+      }, 1000);
+    };
+    const hideOverlay = () => {
+      overlayEl.classList.add("hidden");
+      generateBtn.disabled = false;
+      if (overlayTimer) {
+        clearInterval(overlayTimer);
+        overlayTimer = null;
+      }
+    };
+    const setOverlayStatus = (msg) => {
+      overlayStatus.textContent = msg || "";
+      overlayStatus.dataset.base = msg || "";
     };
 
     document.getElementById("resume-file").addEventListener("change", (e) => {
@@ -318,6 +508,7 @@
 
     document.getElementById("generate").addEventListener("click", () => {
       setStatus("");
+      showOverlay();
       const candidate = document.getElementById("name").value.trim();
       const role = document.getElementById("role").value.trim() || "Product Manager";
       const company = document.getElementById("company").value.trim();
@@ -327,29 +518,45 @@
       const resumeFallback = document.getElementById("resume-text").value.trim();
       const resumeText = uploadedResume.trim() || resumeFallback;
 
-      if (!candidate) return setStatus("Please add your name.", true);
-      if (!jd) return setStatus("Please paste the job description.", true);
-      if (!resumeText) return setStatus("Load or paste your resume.", true);
+      if (!jd) {
+        setStepState("validate", "done");
+        hideOverlay();
+        return setStatus("Please paste the job description.", true);
+      }
+      if (!resumeText) {
+        setStepState("validate", "done");
+        hideOverlay();
+        return setStatus("Load or paste your resume.", true);
+      }
+
+      setStepState("validate", "done");
+      setStepState("prep", "active");
 
       const payload = {
-        name: candidate,
+        name: candidate || null,
         resumeText,
         jdText: jd,
         hmNote: hmNote || null,
         role: role || null,
         company: company || null,
         hiringManager: hiringManager || null,
-        topK: 3,
+        topK: 2,
         embeddingModel: "text-embedding-3-small",
         chatModel: "gpt-4o-mini",
+        orchestrate: true,
       };
 
       setStatus("Calling OpenAI backend...");
-      const callBackend = (outputType) =>
+      setOverlayStatus("Running orchestration loop...");
+      setStepState("prep", "done");
+      setStepState("message", "active");
+      setStepState("cover", "active");
+      const callBackend = (outputType, controller) =>
         fetch(`${API_BASE}/generate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...payload, outputType }),
+          signal: controller.signal,
         }).then(async (res) => {
           if (!res.ok) {
             const err = await res.json().catch(() => ({}));
@@ -358,8 +565,25 @@
           return res.json();
         });
 
-      Promise.all([callBackend("message"), callBackend("cover-letter")])
+      const messageController = new AbortController();
+      const coverController = new AbortController();
+      const timeout = setTimeout(() => {
+        messageController.abort();
+        coverController.abort();
+      }, 120000);
+
+      Promise.all([
+        callBackend("message", messageController).then((msgData) => {
+          setStepState("message", "done");
+          return msgData;
+        }),
+        callBackend("cover-letter", coverController).then((coverData) => {
+          setStepState("cover", "done");
+          return coverData;
+        }),
+      ])
         .then(([msgData, coverData]) => {
+          clearTimeout(timeout);
           messageEl.textContent = msgData.message || "No message returned.";
           coverEl.textContent = coverData.message || "No cover letter returned.";
           const msgTokens = msgData.tokenEstimate ? `msg ~${msgData.tokenEstimate} tok` : "";
@@ -368,10 +592,19 @@
           setStatus(`Drafts updated (OpenAI). ${tokenNote}`);
           setOutputStatus(messageStatus, "");
           setOutputStatus(coverStatus, "");
+          setStepState("finalize", "active");
+          setOverlayStatus("Finalizing outputs...");
+          setTimeout(() => {
+            setStepState("finalize", "done");
+            hideOverlay();
+          }, 600);
         })
         .catch((err) => {
           console.error(err);
+          clearTimeout(timeout);
           setStatus(err.message || "Failed to reach backend.", true);
+          setOverlayStatus("Error from backend.");
+          setTimeout(() => hideOverlay(), 800);
         });
     });
 

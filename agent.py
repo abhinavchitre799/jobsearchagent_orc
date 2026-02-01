@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     source.add_argument("--input-text", help="Inline JD or LinkedIn message text.")
     source.add_argument("--input-file", type=Path, help="File containing the JD or LinkedIn message.")
     parser.add_argument("--hm-note", help="Optional note from hiring manager to blend with the JD.")
-    parser.add_argument("--name", required=True, help="Your name to sign the message.")
+    parser.add_argument("--name", help="Your name to sign the message (optional).")
     parser.add_argument("--role", help="Role you're targeting, if known.")
     parser.add_argument("--company", help="Company name, if known.")
     parser.add_argument("--hiring-manager", help="Hiring manager or contact name, optional.")
@@ -57,6 +57,11 @@ def parse_args() -> argparse.Namespace:
         "--chat-model",
         default="gpt-4o-mini",
         help="OpenAI chat model to draft the message.",
+    )
+    parser.add_argument(
+        "--orchestrate",
+        action="store_true",
+        help="Use AI orchestration to choose the next action.",
     )
     parser.add_argument(
         "--openai-api-key",
@@ -101,24 +106,42 @@ def main() -> None:
     approx_tokens = token_estimate(resume_text, query_text)
     print(f"[info] Estimated prompt tokens: ~{approx_tokens}", flush=True)
     role_value = args.role or "Product Manager"
-    retrieved = retrieve_chunks_with_embeddings(
-        client,
-        resume_chunks,
-        query_text,
-        embedding_model=args.embedding_model,
-        top_k=max(1, args.top_k),
-    )
-    message = build_llm_message(
-        client,
-        candidate=args.name,
-        role=role_value,
-        company=args.company,
-        hiring_manager=args.hiring_manager,
-        query=query_text,
-        retrieved_chunks=retrieved,
-        chat_model=args.chat_model,
-        output_type=args.output_type,
-    )
+    candidate_name = args.name or "Candidate"
+    if args.orchestrate:
+        from rag import generate_orchestrated_message
+
+        message = generate_orchestrated_message(
+            client,
+            candidate=candidate_name,
+            role=role_value,
+            company=args.company,
+            hiring_manager=args.hiring_manager,
+            query=query_text,
+            resume_chunks=resume_chunks,
+            embedding_model=args.embedding_model,
+            top_k=max(1, args.top_k),
+            chat_model=args.chat_model,
+            output_type=args.output_type,
+        )
+    else:
+        retrieved = retrieve_chunks_with_embeddings(
+            client,
+            resume_chunks,
+            query_text,
+            embedding_model=args.embedding_model,
+            top_k=max(1, args.top_k),
+        )
+        message = build_llm_message(
+            client,
+            candidate=candidate_name,
+            role=role_value,
+            company=args.company,
+            hiring_manager=args.hiring_manager,
+            query=query_text,
+            retrieved_chunks=retrieved,
+            chat_model=args.chat_model,
+            output_type=args.output_type,
+        )
     print("\n" + message)
 
 
