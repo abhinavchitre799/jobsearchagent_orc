@@ -24,7 +24,8 @@ DEFAULT_MAX_CHARS = 20000  # cap resume/JD inputs to avoid runaway costs
 LOW_SCORE_THRESHOLD = 0.08  # filter weak matches by default
 MAX_TOP_K = 10
 MESSAGE_MAX_TOKENS = 160
-COVER_LETTER_MAX_TOKENS = 240
+COVER_LETTER_MAX_TOKENS = 320
+COVER_LETTER_RETRY_MAX_TOKENS = 420
 PLAN_MAX_TOKENS = 120
 CRITIC_MAX_TOKENS = 120
 REVISER_MAX_TOKENS = 160
@@ -111,7 +112,12 @@ def summarize_chunk(chunk: str, max_len: int = 140) -> str:
     cutoff = clean.rfind(" ", 0, max_len)
     if cutoff == -1:
         cutoff = max_len
-    return clean[:cutoff].rstrip() + "..."
+    shortened = clean[:cutoff].rstrip() + "..."
+    # If the resume chunk includes the grounding marker, try to keep it visible in the snippet
+    # so the model is less likely to omit it in the final output.
+    if "(from resume)" in clean.lower() and "(from resume)" not in shortened.lower():
+        shortened = shortened.rstrip(".") + " (from resume)"
+    return shortened
 
 
 def cosine_similarity(vec_a: Sequence[float], vec_b: Sequence[float]) -> float:
@@ -218,16 +224,96 @@ def build_llm_message(
         output_type=output_type.replace("-", " "),
     )
     max_tokens = COVER_LETTER_MAX_TOKENS if output_type == "cover-letter" else MESSAGE_MAX_TOKENS
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": textwrap.dedent(user_prompt).strip()},
+    ]
     completion = client.chat.completions.create(
         model=chat_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": textwrap.dedent(user_prompt).strip()},
-        ],
+        messages=messages,
         temperature=0.4,
         max_tokens=max_tokens,
     )
-    return completion.choices[0].message.content.strip()
+    choice = completion.choices[0]
+    content = (choice.message.content or "").strip()
+    finish_reason = getattr(choice, "finish_reason", None)
+
+    # Cover letters are longer and can be clipped by token caps; retry once if truncated.
+    if output_type == "cover-letter" and finish_reason == "length":
+        retry_completion = client.chat.completions.create(
+            model=chat_model,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=max(max_tokens, COVER_LETTER_RETRY_MAX_TOKENS),
+        )
+        return (retry_completion.choices[0].message.content or "").strip()
+
+    def _first_nonempty_line(text: str) -> str:
+        for line in text.splitlines():
+            if line.strip():
+                return line.strip()
+        return ""
+
+    def _word_count(text: str) -> int:
+        return len([t for t in text.split() if t])
+
+    def _violations(text: str) -> list[str]:
+        issues: list[str] = []
+        lower = text.lower()
+        if retrieved_chunks and "(from resume)" not in lower:
+            issues.append('Missing "(from resume)" markers after resume-backed achievements.')
+        greeting = _first_nonempty_line(text)
+        if output_type == "message":
+            # Ensure we greet the hiring manager, not the candidate (hmNote may start with "Hi <candidate>").
+            if hiring_manager and hiring_manager.strip():
+                if hiring_manager.lower() not in greeting.lower():
+                    issues.append("Greeting does not address the hiring manager by name.")
+            if candidate and candidate.strip() and candidate.lower() in greeting.lower():
+                issues.append("Greeting incorrectly addresses the candidate (should address the hiring manager).")
+            if _word_count(text) > 140:
+                issues.append("Message exceeds the 120 word guideline; make it shorter.")
+        if output_type == "cover-letter":
+            if "sincerely" not in lower:
+                issues.append('Missing closing "Sincerely," line.')
+            if candidate and candidate.strip() and candidate.lower() not in lower:
+                issues.append("Missing candidate name in the signature.")
+            if _word_count(text) > 260:
+                issues.append("Cover letter exceeds the 220 word guideline; make it shorter.")
+        # Avoid obvious placeholders in final outputs.
+        if "{{company name}}" in lower or "[company name]" in lower:
+            issues.append("Contains unreplaced company placeholder text.")
+        return issues
+
+    violations = _violations(content)
+    if not violations:
+        return content
+
+    # One strict retry to enforce critical formatting/grounding rules.
+    retry_messages = list(messages)
+    retry_messages.append(
+        {
+            "role": "user",
+            "content": textwrap.dedent(
+                f"""
+                The draft below violates the strict rules:
+                - {'; '.join(violations)}
+
+                DRAFT:
+                {content}
+
+                Rewrite the entire {output_type.replace('-', ' ')} to fix all violations.
+                Return only the final output text.
+                """
+            ).strip(),
+        }
+    )
+    retry_completion = client.chat.completions.create(
+        model=chat_model,
+        messages=retry_messages,
+        temperature=0.0,
+        max_tokens=max_tokens,
+    )
+    return (retry_completion.choices[0].message.content or "").strip()
 
 
 def build_goal(

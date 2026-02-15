@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 import rag
 from api import app
+from queueing import QueueTaskError
 from rag import (
     build_llm_message,
     retrieve_chunks_with_embeddings,
@@ -91,16 +92,52 @@ def test_build_llm_message_uses_chat(monkeypatch):
     assert "Hello there" in msg
 
 
+def test_cover_letter_retries_when_truncated():
+    class RetryClient:
+        class _ChatCompletions:
+            def __init__(self):
+                self.calls = 0
+
+            def create(self, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    msg = SimpleNamespace(content="partial cover letter")
+                    choice = SimpleNamespace(message=msg, finish_reason="length")
+                    return SimpleNamespace(choices=[choice])
+                msg = SimpleNamespace(content="complete cover letter")
+                choice = SimpleNamespace(message=msg, finish_reason="stop")
+                return SimpleNamespace(choices=[choice])
+
+        def __init__(self):
+            self.chat = SimpleNamespace(completions=self._ChatCompletions())
+
+    client = RetryClient()
+    msg = build_llm_message(
+        client,
+        candidate="Alex",
+        role="Product Manager",
+        company="Acme",
+        hiring_manager="Jordan",
+        query="We need PMs",
+        retrieved_chunks=[("Built systems", 0.9)],
+        chat_model="fake-model",
+        output_type="cover-letter",
+    )
+    assert msg == "complete cover letter"
+    assert client.chat.completions.calls == 2
+
+
 def test_api_generate_uses_stubbed_llm(monkeypatch):
     # Patch API dependencies to avoid real OpenAI calls
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     fake_client = FakeOpenAI()
 
-    def fake_embed_texts(_client, texts, model):
-        return [vec.embedding for vec in fake_client.embeddings.create(model=model, input=texts).data]
+    class DummyRunner:
+        def __init__(self, *args, **kwargs):
+            pass
 
-    monkeypatch.setattr(rag, "embed_texts", fake_embed_texts)
-    monkeypatch.setattr("api.generate_agentic_message", lambda *a, **k: "stubbed message")
+    monkeypatch.setattr("api.QueueAgentRunner", DummyRunner)
+    monkeypatch.setattr("api.generate_agentic_message_queued", lambda *a, **k: "stubbed message")
     monkeypatch.setattr("api.OpenAI", lambda api_key=None: fake_client)
     client = TestClient(app)
     payload = {
@@ -115,6 +152,133 @@ def test_api_generate_uses_stubbed_llm(monkeypatch):
     data = resp.json()
     assert data["message"] == "stubbed message"
     assert data["tokenEstimate"] > 0
+
+
+def test_api_extract_name_prefills_from_resume(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    fake_client = FakeOpenAI(response_text='{"name":"Alex Rivera"}')
+
+    monkeypatch.setattr("api.OpenAI", lambda api_key=None: fake_client)
+    client = TestClient(app)
+    payload = {"resumeText": "Alex Rivera\nProduct Manager\nExperience: ... " + ("x" * 300)}
+    resp = client.post("/resume/extract_name", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "Alex Rivera"
+
+
+def test_api_extract_name_returns_null_when_unknown(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    fake_client = FakeOpenAI(response_text='{"name":null}')
+
+    monkeypatch.setattr("api.OpenAI", lambda api_key=None: fake_client)
+    client = TestClient(app)
+    payload = {"resumeText": "Experience: built things." + ("x" * 300)}
+    resp = client.post("/resume/extract_name", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["name"] is None
+
+
+def test_api_extract_name_requires_openai_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(app)
+    payload = {"resumeText": "Alex Rivera" + ("x" * 300)}
+    resp = client.post("/resume/extract_name", json=payload)
+    assert resp.status_code == 500
+
+
+def test_api_discover_jobs_returns_paginated_schema(monkeypatch):
+    monkeypatch.setenv("JOB_DISCOVERY_PROVIDER", "seed")
+
+    class DummyRunner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def discover_jobs(self, **kwargs):
+            return {
+                "count": 2,
+                "page": 1,
+                "pageSize": 10,
+                "hasNextPage": False,
+                "source": "seed",
+                "jobs": [
+                    {
+                        "id": "job-1",
+                        "title": "Product Manager",
+                        "company": "Acme",
+                        "location": "Remote (US)",
+                        "hiringManager": "Jordan Lee",
+                        "source": "seed",
+                        "url": "https://example.com/job-1",
+                        "jdText": "Own roadmap and analytics outcomes.",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr("api.QueueAgentRunner", DummyRunner)
+    client = TestClient(app)
+    payload = {
+        "prompt": "Fetch all PM jobs in US",
+        "page": 1,
+        "pageSize": 10,
+        "country": "us",
+        "strict": True,
+    }
+    resp = client.post("/jobs/discover", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 2
+    assert data["page"] == 1
+    assert data["pageSize"] == 10
+    assert data["hasNextPage"] is False
+    assert data["source"] == "seed"
+    assert len(data["jobs"]) == 1
+    first = data["jobs"][0]
+    assert first["title"]
+    assert first["company"]
+    assert first["jdText"]
+
+
+def test_api_discover_jobs_requires_serpapi_key(monkeypatch):
+    monkeypatch.setenv("JOB_DISCOVERY_PROVIDER", "serpapi")
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+    client = TestClient(app)
+    payload = {"prompt": "Fetch all PM jobs in US"}
+    resp = client.post("/jobs/discover", json=payload)
+    assert resp.status_code == 503
+
+
+def test_api_discover_maps_worker_failure(monkeypatch):
+    monkeypatch.setenv("JOB_DISCOVERY_PROVIDER", "seed")
+
+    class FailingRunner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def discover_jobs(self, **kwargs):
+            raise QueueTaskError("boom")
+
+    monkeypatch.setattr("api.QueueAgentRunner", FailingRunner)
+    client = TestClient(app)
+    payload = {"prompt": "Fetch all PM jobs in US"}
+    resp = client.post("/jobs/discover", json=payload)
+    assert resp.status_code == 502
+
+
+def test_api_discover_maps_timeout(monkeypatch):
+    monkeypatch.setenv("JOB_DISCOVERY_PROVIDER", "seed")
+
+    class TimeoutRunner:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def discover_jobs(self, **kwargs):
+            raise TimeoutError("slow")
+
+    monkeypatch.setattr("api.QueueAgentRunner", TimeoutRunner)
+    client = TestClient(app)
+    payload = {"prompt": "Fetch all PM jobs in US"}
+    resp = client.post("/jobs/discover", json=payload)
+    assert resp.status_code == 504
 
 
 def test_orchestrated_stops_on_no_improvement(monkeypatch):

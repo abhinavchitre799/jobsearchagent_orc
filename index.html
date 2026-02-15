@@ -189,6 +189,80 @@
       margin-top: 10px;
       min-height: 18px;
     }
+    .job-actions { margin-bottom: 12px; }
+    .job-toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .job-pager {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .job-list {
+      display: grid;
+      gap: 10px;
+      max-height: 320px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .job-card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fbfdff;
+    }
+    .job-card h3 {
+      margin: 0 0 6px;
+      font-size: 15px;
+      letter-spacing: -0.1px;
+    }
+    .job-meta {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      line-height: 1.45;
+    }
+    .job-jd {
+      font-size: 13px;
+      color: #334155;
+      margin-bottom: 10px;
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .job-empty {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      font-size: 13px;
+      color: var(--muted);
+      background: #f8fafc;
+    }
+    .jobs-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .jobs-loading .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      border: 2px solid rgba(15, 118, 110, 0.35);
+      border-top-color: var(--accent);
+      animation: spin 0.8s linear infinite;
+    }
+    .hidden-section { display: none; }
     .dual-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
     .overlay {
       position: fixed;
@@ -313,7 +387,35 @@
       </div>
     </header>
 
-    <div class="grid">
+    <div class="panel" style="margin-bottom:20px;">
+      <h2>Discover Openings</h2>
+      <div class="job-actions">
+        <div class="section inline" style="padding:0; border:none;">
+          <div>
+            <label for="job-title">Job title</label>
+            <input id="job-title" type="text" placeholder="Product Manager" value="Product Manager">
+          </div>
+          <div>
+            <label for="job-location">Location</label>
+            <input id="job-location" type="text" placeholder="United States" value="United States">
+          </div>
+        </div>
+      </div>
+      <div class="job-toolbar">
+        <button class="btn" id="fetch-jobs">Fetch jobs</button>
+        <div class="status" id="jobs-status"></div>
+        <div class="job-pager">
+          <button class="btn secondary" id="jobs-prev" type="button">Previous</button>
+          <span id="jobs-page-label">Page 1</span>
+          <button class="btn secondary" id="jobs-next" type="button">Next</button>
+        </div>
+      </div>
+      <div class="job-list" id="job-list">
+        <div class="job-empty">Click "Fetch jobs" to load openings. Selecting one opens the generate panel with fields prefilled.</div>
+      </div>
+    </div>
+
+    <div class="grid hidden-section" id="generate-section">
       <div class="panel">
         <h2>Inputs</h2>
         <div class="section inline">
@@ -432,6 +534,12 @@
 
   <script>
     const statusEl = document.getElementById("status");
+    const jobsStatusEl = document.getElementById("jobs-status");
+    const jobListEl = document.getElementById("job-list");
+    const jobsPrevBtn = document.getElementById("jobs-prev");
+    const jobsNextBtn = document.getElementById("jobs-next");
+    const jobsPageLabel = document.getElementById("jobs-page-label");
+    const generateSectionEl = document.getElementById("generate-section");
     const messageEl = document.getElementById("message-output");
     const coverEl = document.getElementById("cover-output");
     const messageStatus = document.getElementById("message-status");
@@ -443,15 +551,92 @@
     let uploadedResume = "";
     let overlayTimer = null;
     let overlayStartedAt = 0;
+    let selectedJobId = "";
+    let jobsPage = 1;
+    let jobsPageSize = 10;
+    let jobsHasNextPage = false;
+    let jobsLastPrompt = "Product Manager jobs in United States";
+    let jobsCurrent = [];
     const API_BASE = "http://localhost:8000"; // Update if your API runs elsewhere.
 
     const setStatus = (msg, isError = false) => {
       statusEl.textContent = msg;
       statusEl.style.color = isError ? "#b91c1c" : "var(--muted)";
     };
+    const setJobsStatus = (msg, isError = false) => {
+      jobsStatusEl.textContent = msg;
+      jobsStatusEl.style.color = isError ? "#b91c1c" : "var(--muted)";
+    };
     const setOutputStatus = (el, msg, isError = false) => {
       el.textContent = msg;
       el.style.color = isError ? "#b91c1c" : "var(--muted)";
+    };
+    const summarizeText = (text, maxLen = 180) => {
+      const clean = (text || "").replace(/\s+/g, " ").trim();
+      if (clean.length <= maxLen) return clean;
+      return clean.slice(0, maxLen).trim() + "...";
+    };
+    const setJobsLoading = (isLoading) => {
+      if (!isLoading) return;
+      jobListEl.innerHTML = '<div class="jobs-loading"><span class="dot"></span><span>Loading verified jobs...</span></div>';
+    };
+    const escapeHtml = (text) =>
+      String(text || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    const safeExternalUrl = (url) => {
+      if (!url) return "";
+      if (url.startsWith("http://") || url.startsWith("https://")) return url;
+      return "";
+    };
+    const prefillFromJob = (job) => {
+      document.getElementById("role").value = job.title || "";
+      document.getElementById("company").value = job.company || "";
+      document.getElementById("hm-name").value = job.hiringManager || "";
+      document.getElementById("jd").value = job.jdText || "";
+      selectedJobId = job.id || "";
+      setStatus(`Prefilled fields from ${job.company} - ${job.title}`);
+      generateSectionEl.classList.remove("hidden-section");
+      generateSectionEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    const renderJobs = () => {
+      jobsPageLabel.textContent = `Page ${jobsPage}`;
+      jobsPrevBtn.disabled = jobsPage <= 1;
+      jobsNextBtn.disabled = !jobsHasNextPage;
+      if (!jobsCurrent.length) {
+        jobListEl.innerHTML = '<div class="job-empty">No verified jobs found for that prompt. Try a broader PM query.</div>';
+        return;
+      }
+      jobListEl.innerHTML = "";
+      jobsCurrent.forEach((job) => {
+        const card = document.createElement("div");
+        card.className = "job-card";
+        if (job.id && job.id === selectedJobId) {
+          card.style.borderColor = "var(--accent)";
+          card.style.boxShadow = "0 0 0 3px rgba(15, 118, 110, 0.15)";
+        }
+        const metaParts = [job.company, job.location];
+        if (job.hiringManager) metaParts.push(`Hiring manager: ${job.hiringManager}`);
+        const safeUrl = safeExternalUrl(job.url);
+        card.innerHTML = `
+          <h3>${escapeHtml(job.title || "Unknown role")}</h3>
+          <div class="job-meta">${escapeHtml(metaParts.filter(Boolean).join(" • "))}</div>
+          <div class="job-jd">${escapeHtml(summarizeText(job.jdText, 220))}</div>
+          <div class="actions" style="margin-top:0;">
+            <button class="btn secondary" type="button">Use this job</button>
+            ${safeUrl ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="hint">Open source</a>` : ""}
+          </div>
+        `;
+        const useBtn = card.querySelector("button");
+        useBtn.addEventListener("click", () => {
+          prefillFromJob(job);
+          renderJobs();
+        });
+        jobListEl.appendChild(card);
+      });
     };
     const resetOverlay = () => {
       stepItems.forEach((item) => {
@@ -494,6 +679,45 @@
       overlayStatus.dataset.base = msg || "";
     };
 
+    const nameEl = document.getElementById("name");
+    const resumeTextEl = document.getElementById("resume-text");
+    let nameExtractTimer = null;
+    let lastNameExtractPayload = "";
+    const extractNameFromResume = async () => {
+      const resumeText = (uploadedResume || "").trim() || (resumeTextEl.value || "").trim();
+      if (!resumeText) return;
+      // Avoid spending tokens on obviously too-short text.
+      if (resumeText.length < 120) return;
+      // Never overwrite a user-provided name.
+      if ((nameEl.value || "").trim()) return;
+      // Deduplicate requests.
+      const payloadKey = resumeText.slice(0, 2000);
+      if (payloadKey === lastNameExtractPayload) return;
+      lastNameExtractPayload = payloadKey;
+      try {
+        const res = await fetch(`${API_BASE}/resume/extract_name`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resumeText }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const extracted = (data && data.name ? String(data.name) : "").trim();
+        if (extracted && !(nameEl.value || "").trim()) {
+          nameEl.value = extracted;
+          setStatus(`Detected name from resume: ${extracted}`);
+        }
+      } catch (_err) {
+        // Silent: name extraction is a convenience feature.
+      }
+    };
+    const scheduleNameExtract = () => {
+      if (nameExtractTimer) clearTimeout(nameExtractTimer);
+      nameExtractTimer = setTimeout(() => {
+        extractNameFromResume();
+      }, 700);
+    };
+
     document.getElementById("resume-file").addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (!file) { uploadedResume = ""; return; }
@@ -501,10 +725,77 @@
       reader.onload = () => {
         uploadedResume = reader.result;
         setStatus(`Loaded resume: ${file.name}`);
+        scheduleNameExtract();
       };
       reader.onerror = () => setStatus("Could not read that file. Try a .txt export.", true);
       reader.readAsText(file);
     });
+    resumeTextEl.addEventListener("input", scheduleNameExtract);
+
+    const normalizeJobTitle = (title) => {
+      const t = String(title || "").trim();
+      if (!t) return "Product Manager";
+      if (/^pm$/i.test(t)) return "Product Manager";
+      if (/^product\s*mg?r$/i.test(t)) return "Product Manager";
+      return t;
+    };
+    const normalizeLocation = (location) => {
+      const loc = String(location || "").trim();
+      if (!loc) return "United States";
+      if (/^us$/i.test(loc) || /^usa$/i.test(loc) || /^u\\.?s\\.?a\\.?$/i.test(loc)) return "United States";
+      return loc;
+    };
+    const buildDiscoveryPrompt = (title, location) => {
+      const role = normalizeJobTitle(title);
+      const loc = normalizeLocation(location);
+      return `${role} jobs in ${loc}`;
+    };
+
+    const fetchJobs = async (requestedPage = 1) => {
+      const title = document.getElementById("job-title").value;
+      const location = document.getElementById("job-location").value;
+      const prompt = buildDiscoveryPrompt(title, location);
+      jobsPage = Math.max(1, requestedPage);
+      jobsLastPrompt = prompt;
+      setJobsStatus("Fetching jobs...");
+      setJobsLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/jobs/discover`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            page: jobsPage,
+            pageSize: jobsPageSize,
+            country: "us",
+            strict: true,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || "Could not fetch jobs.");
+        }
+        const data = await res.json();
+        jobsCurrent = data.jobs || [];
+        jobsHasNextPage = Boolean(data.hasNextPage);
+        jobsPage = Number(data.page || jobsPage);
+        const total = Number(data.count || jobsCurrent.length);
+        setJobsStatus(`Loaded ${jobsCurrent.length} verified openings (total ${total}).`);
+        renderJobs();
+      } catch (err) {
+        console.error(err);
+        setJobsStatus(err.message || "Failed to fetch jobs.", true);
+        jobsCurrent = [];
+        jobsHasNextPage = false;
+        renderJobs();
+      }
+    };
+
+    document.getElementById("fetch-jobs").addEventListener("click", () => fetchJobs(1));
+    jobsPrevBtn.addEventListener("click", () => fetchJobs(jobsPage - 1));
+    jobsNextBtn.addEventListener("click", () => fetchJobs(jobsPage + 1));
+    // Load job cards on first paint so the landing view immediately shows openings.
+    fetchJobs(1);
 
     document.getElementById("generate").addEventListener("click", () => {
       setStatus("");

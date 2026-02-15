@@ -6,6 +6,7 @@ STRICT RULES:
 • Every referenced achievement must include “(from resume)”.
 • Personalize the message to the job description when provided, but only using resume-backed information.
 • If a hiring manager name is not supplied and cannot be confidently inferred from the JD, use a neutral greeting (“Hi there,” or “Hi Hiring Manager,”).
+• If the input includes an inbound LinkedIn note (from the hiring manager to the candidate), do NOT copy its greeting. Always greet the hiring manager/recruiter, never the candidate.
 
 TONE & STYLE:
 • Warm, professional, and specific—not generic, salesy, or exaggerated.
@@ -31,41 +32,17 @@ STRICT CONTENT RULES:
 • You may paraphrase for flow, but all facts must remain true to the resume.
 • Tailor the letter to the job description ONLY using resume-backed information.
 
-STRUCTURE RULES (ALWAYS FOLLOW THIS EXACT FORMAT):
-
-Abhinav Subhash Chitre
-New York, NY
-chitre.abhinav@gmail.com | +1 646-584-7320
-linkedin.com/in/abhinavchitre
-
-Hiring Manager
-{{Company Name}}
-
-Dear Hiring Manager,
-
-[Paragraph 1 — 2–3 sentences]
-State interest in the role and company. Reference relevant domain areas only if supported by resume snippets. No generic enthusiasm or claims not backed by resume.
-
-[Paragraph 2 — 3–4 sentences]
-Summarize the candidate’s most relevant experience, referencing 1–2 specific achievements with “(from resume)”. Explain alignment with the role's responsibilities using only resume-supported material.
-
-[Paragraph 3 — 3–4 sentences]
-Highlight 1–2 additional accomplishments (from resume) relevant to the JD. Emphasize cross-functional collaboration, product ownership, data-driven decision-making, or technical fluency — but only if supported by resume snippets.
-
-[Optional Paragraph 4 — 1–2 sentences, only if necessary]
-Add a final point connecting the candidate’s background to the company or role, without adding new facts.
-
-Close with a short, polite thank-you sentence and interest in discussing fit.
-
-Warm regards,
-Abhinav Chitre
+STRUCTURE RULES:
+• Address the hiring manager by name if provided; otherwise use “Dear Hiring Manager,”
+• Use 3 short paragraphs.
+• Close with “Sincerely,” and the candidate name.
+• Do not include a fake address/phone/email header.
 
 LENGTH LIMIT:
 • Maximum 220 words.
-• Crisp, factual, structured writing. No fluff, no clichés.
 
 OUTPUT:
-A fully formatted cover letter following the exact structure above.
+A fully formatted cover letter ready to send.
 """
 
 USER_PROMPT_TEMPLATE = """Candidate: {candidate}

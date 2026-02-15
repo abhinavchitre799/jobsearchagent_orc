@@ -1,12 +1,41 @@
-## Job Search Agent (OpenAI RAG + Orchestration)
+## Job Search Agent (OpenAI RAG + Queue-Orchestrated Agents)
 
-Generate a LinkedIn outreach message or cover letter grounded in your resume. The system uses OpenAI embeddings + chat with an agentic orchestration loop (plan → draft → critique → revise → finalize) and guardrails to prevent runaway behavior.
+Generate a LinkedIn outreach message or cover letter grounded in your resume. The system uses OpenAI embeddings + chat with a FastAPI orchestrator service and queue-backed agent workers (retrieve → plan → draft → critique → revise).
 
-### OpenAI UI
-- Install deps and run the API server:
+### OpenAI UI (queue-backed runtime)
+- Install deps:
   ```bash
   pip install -r requirements.txt
-  export OPENAI_API_KEY=sk-...
+  ```
+- Configure env (recommended: repo-local `.env`, which is gitignored):
+  ```bash
+  cat > .env <<'EOF'
+  OPENAI_API_KEY=
+  # SERPAPI_API_KEY=
+  # JOB_DISCOVERY_PROVIDER=serpapi  # optional; auto-selects serpapi if SERPAPI_API_KEY is set
+  # REDIS_URL=redis://localhost:6380/0
+  EOF
+  ```
+- Quick dev start (starts Redis + worker + API + UI server):
+  ```bash
+  ./scripts/dev_up.sh
+  # UI:  http://localhost:5500/index.html
+  ```
+- Stop dev processes:
+  ```bash
+  ./scripts/dev_down.sh
+  ```
+- Start one worker process per agent queue (recommended):
+  ```bash
+  python worker.py --queues retriever
+  python worker.py --queues planner
+  python worker.py --queues drafter
+  python worker.py --queues critic
+  python worker.py --queues reviser
+  python worker.py --queues job_discovery
+  ```
+- Run the orchestrator API server:
+  ```bash
   uvicorn api:app --reload --port 8000
   ```
 - Serve the static UI:
@@ -15,6 +44,7 @@ Generate a LinkedIn outreach message or cover letter grounded in your resume. Th
   # then open http://localhost:5500/index.html
   ```
 - In the UI, fill in the fields, upload/paste your resume, and click **Generate drafts**. You can copy or download the outputs. The page calls `http://localhost:8000/generate` and shows a loader overlay while the agent runs.
+- The UI now includes a **Discover PM Openings** panel. Enter a natural language prompt (default: `Fetch all PM jobs in US`), fetch jobs, then choose **Use this job**. The generate panel appears with role/company/hiring-manager/JD prefilled.
 
 ### OpenAI RAG + LLM CLI
 - Requires `pip install openai` and `OPENAI_API_KEY` set.
@@ -57,17 +87,22 @@ Generate a LinkedIn outreach message or cover letter grounded in your resume. Th
 ### What it does
 - Ingests your resume, splits it into readable chunks, embeds them, and matches against the JD/LinkedIn message via cosine similarity.
 - Selects top resume snippets, then drafts either a LinkedIn-ready note or a cover letter with a chat model, grounded in those snippets.
-- Optionally runs an orchestration loop to plan, critique, and revise the draft with guardrails.
+- Uses queued agent workers for retrieval/planning/drafting/critique/revision, coordinated by the FastAPI orchestrator.
 
 ### Architecture (current)
-1. **Inputs**: resume text + job description + optional hiring manager note.
-2. **Chunking**: `split_into_chunks` creates paragraph-like resume chunks.
-3. **Embeddings**: `embed_texts` generates cached embeddings.
-4. **Retrieval**: `retrieve_chunks_with_embeddings` scores and selects top-k snippets.
-5. **Generation**:
-   - **Single-shot**: draft directly from snippets.
-   - **Orchestrated**: plan → draft → critique → revise → finalize.
-6. **Guardrails**:
+1. **Orchestrator API (`api.py`)**: validates input, builds run state, and controls agent switching.
+2. **Queue layer (`queueing.py`)**: enqueues jobs and waits for results via Redis + RQ.
+3. **Specialized workers (`worker_tasks.py`)**:
+   - `retriever`: embedding-based chunk retrieval
+   - `planner`: plan generation
+   - `drafter`: draft generation
+   - `critic`: JSON critique
+   - `reviser`: critique-driven revision
+   - `job_discovery`: LLM prompt parsing + SerpAPI fetch + strict verification + pagination
+4. **Queue-aware orchestration (`orchestrator_queue.py`)**:
+   - **Fixed path**: retrieve → plan → draft → critique → optional revise
+   - **Adaptive path**: orchestrator chooses next action each cycle
+5. **Guardrails**:
    - Revision cap (max 2)
    - No-improvement stop
    - Deterministic fallback draft if the loop stalls
@@ -84,6 +119,16 @@ Generate a LinkedIn outreach message or cover letter grounded in your resume. Th
 - Required: `resumeText`, `jdText`
 - Optional: `name`, `hmNote`, `role`, `company`, `hiringManager`
 - Controls: `topK`, `embeddingModel`, `chatModel`, `outputType`, `orchestrate`
+- Behavior: request stays synchronous but internally dispatches queued tasks to worker processes.
+
+### API contract (POST /jobs/discover)
+- Required: `prompt`
+- Optional: `page`, `pageSize`, `country`, `strict` (strict is enforced `true` in current MVP)
+- Returns: `count`, `page`, `pageSize`, `hasNextPage`, `source`, and verified `jobs`.
+- Error semantics:
+  - `503` if `SERPAPI_API_KEY` is missing while provider is `serpapi`
+  - `502` for worker/provider failures
+  - `504` for discovery timeouts
 
 ### Example output
 ```
